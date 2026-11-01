@@ -29,6 +29,10 @@ input{background:#1c2038;color:#eee;width:100%;max-width:320px;outline:1px solid
 #bar{display:flex;gap:8px;padding:12px;border-top:1px solid #232846}#bar input{max-width:none;flex:1}
 .empty{margin:auto;color:#789;text-align:center;padding:20px}
 @media(max-width:700px){#side{width:100%}#chat{display:none;width:100%}#app.chatting #side{display:none}#app.chatting #chat{display:flex}#back{display:block}}
+#toasts{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;flex-direction:column}
+.tb,#gbox{padding:10px 16px;background:#1c2038;border-bottom:1px solid #232846;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tb button,#gbox button{padding:6px 12px;font-size:.85rem;cursor:pointer;background:#6c5ce7;color:#fff}
+#gbox .q{flex-basis:100%;font-size:1.05rem}
 </style></head><body>
 
 <div id="s1" class="center"><h1>💬 Baatlo</h1><p>No sign-up. No phone number. No email.</p>
@@ -45,11 +49,14 @@ input{background:#1c2038;color:#eee;width:100%;max-width:320px;outline:1px solid
 <div id="app" class="hide">
  <div id="side"><h3 id="stitle">Online</h3><div id="list"></div></div>
  <div id="chat"><div id="head"><button id="back" onclick="closeChat()">←</button><b id="who">Select someone</b>
-  <button onclick="blk()" id="bb" class="hide">Block</button><button onclick="rep()" id="rb" class="hide">Report</button></div>
+  <button onclick="blk()" id="bb" class="hide">Block</button><button onclick="rep()" id="rb" class="hide">Report</button>
+  <button onclick="callBtn()" id="cb" class="hide">📞 Call</button><button onclick="invite()" id="gb" class="hide">🎲 Truth &amp; Dare</button></div>
+  <div id="gbox" class="hide"></div>
   <div id="msgs"><div class="empty">Click on someone who is online to start chatting 👈</div></div>
   <form id="bar" class="hide" onsubmit="send(event)"><input id="txt" maxlength="500" placeholder="Type a message..." autocomplete="off"><button class="btn">Send</button></form>
  </div></div>
 
+<div id="toasts"></div><audio id="ra" autoplay></audio>
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const s=io();let gender=null,users=[],active=null,chats={},unread={};
@@ -82,8 +89,8 @@ function renderList(){
 function open(id){
  active=id;unread[id]=0;const u=users.find(x=>x.id===id);
  $('who').textContent=u?u.name+', '+u.age:'Offline';
- ['bb','rb'].forEach(i=>$(i).classList.remove('hide'));$('bar').classList.remove('hide');
- $('app').classList.add('chatting');renderList();renderChat();
+ ['bb','rb','cb','gb'].forEach(i=>$(i).classList.remove('hide'));$('bar').classList.remove('hide');
+ $('app').classList.add('chatting');renderList();renderChat();renderGame();
 }
 function closeChat(){$('app').classList.remove('chatting')}
 function renderChat(){
@@ -101,4 +108,116 @@ function rep(){if(active){s.emit('report',active);alert('Reported. Thank you.')}
 s.on('users',l=>{users=l;if(active&&!users.find(u=>u.id===active))$('who').textContent='Offline';renderList()});
 s.on('msg',m=>{(chats[m.from]=chats[m.from]||[]).push({me:false,text:m.text});
  if(active===m.from)renderChat();else{unread[m.from]=1;renderList()}});
+
+const nm=id=>{const u=users.find(x=>x.id===id);return u?u.name:'Someone'};
+function banner(key,text,btns){
+ unbanner(key);const d=document.createElement('div');d.className='tb';d.id='b-'+key;
+ const t=document.createElement('span');t.textContent=text;d.appendChild(t);
+ btns.forEach(([l,f])=>{const b=document.createElement('button');b.textContent=l;b.onclick=f;d.appendChild(b)});
+ $('toasts').appendChild(d);
+}
+function unbanner(key){const e=$('b-'+key);if(e)e.remove()}
+
+/* ---------- Voice call (audio only) ---------- */
+let pc=null,peer=null,localStream=null,pendOffer=null,pendIce=[];
+const rtc=(to,data)=>s.emit('rtc',{to,data});
+async function mkpc(id){
+ peer=id;
+ localStream=await navigator.mediaDevices.getUserMedia({audio:true});
+ pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+ localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
+ pc.ontrack=e=>{$('ra').srcObject=e.streams[0]};
+ pc.onicecandidate=e=>e.candidate&&rtc(id,{t:'ice',c:e.candidate});
+ pc.onconnectionstatechange=()=>{if(['failed','closed'].includes(pc.connectionState))endCall(false)};
+}
+async function callBtn(){
+ if(pc)return endCall(true);
+ if(!active)return;
+ try{
+  await mkpc(active);const o=await pc.createOffer();await pc.setLocalDescription(o);
+  rtc(active,{t:'offer',sdp:o});
+  banner('call','Calling '+nm(active)+'...',[['Cancel',()=>endCall(true)]]);
+  $('cb').textContent='📞 Hang up';
+ }catch(e){endCall(false);alert('Could not start the call. Please allow microphone access.')}
+}
+function endCall(send){
+ if(send&&peer)rtc(peer,{t:'hangup'});
+ if(pc){pc.close();pc=null}
+ if(localStream){localStream.getTracks().forEach(t=>t.stop());localStream=null}
+ $('ra').srcObject=null;peer=null;pendOffer=null;pendIce=[];
+ $('cb').textContent='📞 Call';unbanner('call');
+}
+async function acceptCall(){
+ const o=pendOffer;pendOffer=null;
+ try{
+  await mkpc(o.from);await pc.setRemoteDescription(o.sdp);
+  pendIce.forEach(c=>pc.addIceCandidate(c));pendIce=[];
+  const a=await pc.createAnswer();await pc.setLocalDescription(a);
+  rtc(o.from,{t:'answer',sdp:a});
+  banner('call','On call with '+nm(o.from),[['Hang up',()=>endCall(true)]]);
+  $('cb').textContent='📞 Hang up';
+ }catch(e){endCall(true);alert('Could not answer the call. Please allow microphone access.')}
+}
+async function onRtc(from,d){
+ if(d.t==='offer'){
+  if(pc||pendOffer)return rtc(from,{t:'busy'});
+  pendOffer={from,sdp:d.sdp};
+  banner('call',nm(from)+' is calling you 📞',[['Accept',acceptCall],['Decline',()=>{rtc(from,{t:'decline'});pendOffer=null;endCall(false)}]]);
+ }else if(d.t==='answer'&&pc&&from===peer){
+  await pc.setRemoteDescription(d.sdp);
+  pendIce.forEach(c=>pc.addIceCandidate(c));pendIce=[];
+  banner('call','On call with '+nm(from),[['Hang up',()=>endCall(true)]]);
+ }else if(d.t==='ice'){
+  if(pc&&pc.remoteDescription&&from===peer)pc.addIceCandidate(d.c);else pendIce.push(d.c);
+ }else if(['hangup','decline','busy'].includes(d.t)){
+  if(from===peer||(pendOffer&&pendOffer.from===from)){
+   endCall(false);
+   if(d.t==='decline')alert('Call declined.');
+   if(d.t==='busy')alert('User is busy on another call.');
+  }
+ }
+}
+s.on('rtc',m=>onRtc(m.from,m.data));
+
+/* ---------- Truth or Dare ---------- */
+let game=null; // {with, turn:'me'|'them', q:null|{kind,text}}
+function invite(){
+ if(!active)return;
+ if(game)return alert('A game is already running.');
+ s.emit('game',{to:active,type:'invite'});alert('Invite sent! Waiting for them to accept.');
+}
+const gsend=(type,kind)=>s.emit('game',{to:game?game.with:active,type,kind});
+function renderGame(){
+ const g=$('gbox');
+ if(!game||game.with!==active){g.classList.add('hide');return}
+ g.innerHTML='';g.classList.remove('hide');
+ const add=(txt,cls)=>{const d=document.createElement('div');if(cls)d.className=cls;d.textContent=txt;g.appendChild(d)};
+ const btn=(l,f)=>{const b=document.createElement('button');b.textContent=l;b.onclick=f;g.appendChild(b)};
+ add('🎲 Truth or Dare with '+nm(game.with));
+ if(game.q){
+  add((game.q.kind==='truth'?'😇 TRUTH: ':'😈 DARE: ')+game.q.text,'q');
+  if(game.turn==='them')btn('Done ✔ (my turn to choose)',()=>{gsend('done');gameDone()});
+  else add('Waiting for them to complete it in the chat...');
+ }else if(game.turn==='me'){
+  add('Your turn to choose for them:');
+  btn('Truth 😇',()=>gsend('pick','truth'));btn('Dare 😈',()=>gsend('pick','dare'));
+ }else add('Waiting for '+nm(game.with)+' to choose Truth or Dare...');
+ btn('End game',()=>{gsend('end');game=null;renderGame()});
+}
+function gameDone(){game.q=null;game.turn=game.turn==='me'?'them':'me';renderGame()}
+s.on('game',m=>{
+ if(m.type==='invite'){
+  banner('game',nm(m.from)+' wants to play Truth or Dare 🎲',[
+   ['Play',()=>{s.emit('game',{to:m.from,type:'accept'});game={with:m.from,turn:'them',q:null};unbanner('game');open(m.from)}],
+   ['No thanks',()=>{s.emit('game',{to:m.from,type:'decline'});unbanner('game')}]]);
+ }else if(m.type==='accept'){game={with:m.from,turn:'me',q:null};open(m.from)}
+ else if(m.type==='decline')alert('They declined the game invite.');
+ else if(m.type==='q'&&game){game.q={kind:m.kind,text:m.text};renderGame()}
+ else if(m.type==='done'&&game)gameDone();
+ else if(m.type==='end'&&game){game=null;renderGame();alert('The game was ended.')}
+});
+s.on('users',l=>{
+ if(game&&!l.find(u=>u.id===game.with)){game=null;renderGame()}
+ if(peer&&!l.find(u=>u.id===peer))endCall(false);
+});
 </script></body></html>
