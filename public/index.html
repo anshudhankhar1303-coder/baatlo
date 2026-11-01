@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Baatlo - Anonymous Chat, No Sign-up</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#0f1220;color:#eee;height:100dvh}
+.hide{display:none!important}
+.center{height:100dvh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px;text-align:center}
+h1{margin:0;font-size:2.2rem}p{margin:0;color:#9aa}
+button,input{font:inherit;border-radius:10px;border:0;padding:12px 16px}
+.btn{background:#6c5ce7;color:#fff;cursor:pointer;font-weight:600}.btn:hover{background:#5a4bd1}
+input{background:#1c2038;color:#eee;width:100%;max-width:320px;outline:1px solid #2c3158}
+.g{display:flex;gap:10px;max-width:320px;width:100%}.g button{flex:1;background:#1c2038;color:#eee;cursor:pointer;outline:1px solid #2c3158}
+.g button.on{background:#6c5ce7}
+#app{display:flex;height:100dvh}
+#side{width:300px;border-right:1px solid #232846;overflow-y:auto;background:#12162a}
+#side h3{margin:0;padding:16px;border-bottom:1px solid #232846;font-size:1rem}
+.u{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;border-bottom:1px solid #1a1f38}
+.u:hover,.u.act{background:#1c2038}
+.av{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;flex:none}
+.dot{width:9px;height:9px;border-radius:50%;background:#2ecc71;margin-left:auto}.dot.new{background:#ff7675}
+#chat{flex:1;display:flex;flex-direction:column;min-width:0}
+#head{padding:12px 16px;border-bottom:1px solid #232846;display:flex;gap:8px;align-items:center}
+#head b{flex:1}#head button{background:#232846;color:#eee;padding:6px 10px;font-size:.8rem;cursor:pointer}
+#back{display:none}
+#msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
+.m{max-width:75%;padding:9px 13px;border-radius:14px;background:#232846;word-wrap:break-word;white-space:pre-wrap}
+.m.me{align-self:flex-end;background:#6c5ce7}
+#bar{display:flex;gap:8px;padding:12px;border-top:1px solid #232846}#bar input{max-width:none;flex:1}
+.empty{margin:auto;color:#789;text-align:center;padding:20px}
+@media(max-width:700px){#side{width:100%}#chat{display:none;width:100%}#app.chatting #side{display:none}#app.chatting #chat{display:flex}#back{display:block}}
+</style></head><body>
+
+<div id="s1" class="center"><h1>💬 Baatlo</h1><p>No sign-up. No phone number. No email.</p>
+<button class="btn" onclick="go('s2')">Start Chatting</button></div>
+
+<div id="s2" class="center hide"><h2>Enter your details</h2>
+<input id="nick" maxlength="20" placeholder="Nickname (optional)">
+<input id="age" type="number" min="18" max="99" placeholder="Age (18+)">
+<div class="g"><button id="gm" onclick="pick('male')">Male</button><button id="gf" onclick="pick('female')">Female</button></div>
+<p id="err" style="color:#ff7675"></p>
+<button class="btn" onclick="join()">Go Online</button>
+<p style="font-size:.8rem">18+ only. Please be respectful to everyone.</p></div>
+
+<div id="app" class="hide">
+ <div id="side"><h3 id="stitle">Online</h3><div id="list"></div></div>
+ <div id="chat"><div id="head"><button id="back" onclick="closeChat()">←</button><b id="who">Select someone</b>
+  <button onclick="blk()" id="bb" class="hide">Block</button><button onclick="rep()" id="rb" class="hide">Report</button></div>
+  <div id="msgs"><div class="empty">Click on someone who is online to start chatting 👈</div></div>
+  <form id="bar" class="hide" onsubmit="send(event)"><input id="txt" maxlength="500" placeholder="Type a message..." autocomplete="off"><button class="btn">Send</button></form>
+ </div></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const s=io();let gender=null,users=[],active=null,chats={},unread={};
+const $=id=>document.getElementById(id);
+const cols=['#e17055','#00b894','#0984e3','#e84393','#fdcb6e','#6c5ce7'];
+const col=id=>cols[[...id].reduce((a,c)=>a+c.charCodeAt(0),0)%cols.length];
+function go(x){['s1','s2'].forEach(i=>$(i).classList.add('hide'));$(x).classList.remove('hide')}
+function pick(g){gender=g;$('gm').classList.toggle('on',g=='male');$('gf').classList.toggle('on',g=='female')}
+function join(){
+ const age=parseInt($('age').value,10);
+ if(!(age>=18))return $('err').textContent='Only 18+ users are allowed.';
+ if(!gender)return $('err').textContent='Please select your gender.';
+ s.emit('join',{name:$('nick').value,age,gender},r=>{
+  if(r.error)return $('err').textContent=r.error;
+  $('s2').classList.add('hide');$('app').classList.remove('hide');
+  $('stitle').textContent='Online '+(gender=='male'?'Females':'Males');
+ });
+}
+function renderList(){
+ const l=$('list');l.innerHTML='';
+ if(!users.length){l.innerHTML='<div class="empty">Nobody is online right now. Check back soon or share the link with your friends!</div>';return}
+ users.forEach(u=>{
+  const d=document.createElement('div');d.className='u'+(u.id===active?' act':'');
+  const a=document.createElement('div');a.className='av';a.style.background=col(u.id);a.textContent=u.name[0].toUpperCase();
+  const n=document.createElement('div');n.textContent=u.name+', '+u.age;
+  const dot=document.createElement('div');dot.className='dot'+(unread[u.id]?' new':'');
+  d.append(a,n,dot);d.onclick=()=>open(u.id);l.appendChild(d);
+ });
+}
+function open(id){
+ active=id;unread[id]=0;const u=users.find(x=>x.id===id);
+ $('who').textContent=u?u.name+', '+u.age:'Offline';
+ ['bb','rb'].forEach(i=>$(i).classList.remove('hide'));$('bar').classList.remove('hide');
+ $('app').classList.add('chatting');renderList();renderChat();
+}
+function closeChat(){$('app').classList.remove('chatting')}
+function renderChat(){
+ const m=$('msgs');m.innerHTML='';
+ (chats[active]||[]).forEach(x=>{const d=document.createElement('div');d.className='m'+(x.me?' me':'');d.textContent=x.text;m.appendChild(d)});
+ m.scrollTop=m.scrollHeight;
+}
+function send(e){
+ e.preventDefault();const t=$('txt').value.trim();if(!t||!active)return;
+ s.emit('msg',{to:active,text:t});(chats[active]=chats[active]||[]).push({me:true,text:t});
+ $('txt').value='';renderChat();
+}
+function blk(){if(active&&confirm('Block this user?')){s.emit('block',active);active=null;$('who').textContent='Select someone';$('bar').classList.add('hide');$('msgs').innerHTML='';closeChat()}}
+function rep(){if(active){s.emit('report',active);alert('Reported. Thank you.')}}
+s.on('users',l=>{users=l;if(active&&!users.find(u=>u.id===active))$('who').textContent='Offline';renderList()});
+s.on('msg',m=>{(chats[m.from]=chats[m.from]||[]).push({me:false,text:m.text});
+ if(active===m.from)renderChat();else{unread[m.from]=1;renderList()}});
+</script></body></html>
