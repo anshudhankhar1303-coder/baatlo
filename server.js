@@ -110,15 +110,31 @@ io.on('connection', socket => {
   });
 
   // Truth or Dare
-  socket.on('game', ({ to, type, kind } = {}) => {
+  // Two Truths and a Lie
+  socket.on('tl', ({ to, type, stmts, lie, guess } = {}) => {
     if (!allowed(socket.id, to)) return;
-    if (type === 'pick') {
-      if (!['truth', 'dare'].includes(kind)) return;
-      const text = pickOne(kind === 'truth' ? TRUTHS : DARES);
-      for (const id of [socket.id, to]) io.to(id).emit('game', { from: socket.id, type: 'q', kind, text });
+    if (['invite', 'accept', 'decline', 'next', 'end'].includes(type)) {
+      io.to(to).emit('tl', { from: socket.id, type });
       return;
     }
-    if (['invite', 'accept', 'decline', 'done', 'end'].includes(type)) io.to(to).emit('game', { from: socket.id, type });
+    if (type === 'set') {
+      const peerSock = io.sockets.sockets.get(to);
+      if (!peerSock || !Array.isArray(stmts) || stmts.length !== 3 || !Number.isInteger(lie) || lie < 0 || lie > 2) return;
+      const items = stmts.map((s, i) => ({ t: clean(s, 120), lie: i === lie }));
+      if (items.some(x => !x.t)) return;
+      items.sort(() => Math.random() - 0.5);
+      peerSock.tlPending = { from: socket.id, stmts: items.map(x => x.t), lie: items.findIndex(x => x.lie) };
+      io.to(to).emit('tl', { from: socket.id, type: 'guess', stmts: peerSock.tlPending.stmts });
+      return;
+    }
+    if (type === 'guess') {
+      const r = socket.tlPending;
+      if (!r || r.from !== to || !Number.isInteger(guess) || guess < 0 || guess > 2) return;
+      socket.tlPending = null;
+      for (const id of [socket.id, to]) {
+        io.to(id).emit('tl', { from: socket.id, type: 'result', stmts: r.stmts, lie: r.lie, guess, correct: guess === r.lie });
+      }
+    }
   });
 
   socket.on('block', id => {
