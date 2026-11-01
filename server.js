@@ -4,11 +4,58 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { maxHttpBufferSize: 1e4 });
+const io = new Server(server, { maxHttpBufferSize: 1e5 });
 app.use(express.static('public'));
 
 const users = new Map();   // socket.id -> {name, age, gender, last}
 const blocks = new Map();  // socket.id -> Set of ids blocked
+
+
+const TRUTHS = [
+  "What's the most embarrassing thing that has happened to you in public?",
+  "What's your most unpopular opinion?",
+  "What's the last lie you told?",
+  "What's a secret talent nobody knows you have?",
+  "Who was your first celebrity crush?",
+  "What's the weirdest dream you can remember?",
+  "What's the most childish thing you still do?",
+  "If you could swap lives with anyone for a day, who would it be and why?",
+  "What's a fear of yours that sounds silly?",
+  "What's the worst gift you've ever received?",
+  "Which song do you secretly love but would be embarrassed to admit?",
+  "What's the craziest thing you've done for a crush?",
+  "What's one thing about you that would surprise people?",
+  "What's your most awkward first-meeting moment ever?",
+  "If you had to delete one app forever, which one would it be?",
+  "What's the pettiest reason you've stopped talking to someone?",
+  "What's your go-to flirting line? Be honest!",
+  "What's something you pretend to like but actually don't?",
+  "What's the funniest nickname you've ever had?",
+  "What's your biggest red flag?"
+];
+const DARES = [
+  "Describe your day using only emojis.",
+  "Write a 4-line poem about this chat, right now.",
+  "Type your next 3 messages with your eyes closed.",
+  "Share your cringiest pickup line and rate it out of 10.",
+  "Describe me in exactly 3 words based on this chat.",
+  "Use only one-word answers for the next 5 minutes.",
+  "Invent a funny movie title about how we met.",
+  "Say something nice about me in your mother tongue.",
+  "Talk like a pirate for your next 3 messages.",
+  "Tell a joke so bad that it makes me groan.",
+  "Make up a dramatic backstory for your nickname.",
+  "Invent a secret handshake for us and describe it.",
+  "Write a one-line horoscope for me.",
+  "Guess my favourite food and defend your answer.",
+  "Do your best villain laugh in text.",
+  "Share the last emoji you used and explain why.",
+  "Speak only in rhymes for the next 3 messages.",
+  "Act like a news anchor and announce our chat as breaking news.",
+  "Pitch me a ridiculous startup idea in one sentence.",
+  "Give me a fake award title and explain why I deserve it."
+];
+const pickOne = a => a[Math.floor(Math.random() * a.length)];
 
 const clean = (s, n) => String(s || '').replace(/[<>]/g, '').trim().slice(0, n);
 const opposite = g => (g === 'male' ? 'female' : 'male');
@@ -24,6 +71,12 @@ function visibleTo(id) {
     out.push({ id: uid, name: u.name, age: u.age });
   }
   return out;
+}
+
+function allowed(a, b) {
+  const x = users.get(a), y = users.get(b);
+  return !!(x && y && x.gender !== y.gender &&
+    !(blocks.get(b) || new Set()).has(a) && !(blocks.get(a) || new Set()).has(b));
 }
 const refresh = () => { for (const id of users.keys()) io.to(id).emit('users', visibleTo(id)); };
 
@@ -48,6 +101,24 @@ io.on('connection', socket => {
     if (now - me.last < 600) return;  // basic spam limit
     me.last = now;
     io.to(to).emit('msg', { from: socket.id, name: me.name, age: me.age, text });
+  });
+
+  // Voice call signalling (WebRTC) - audio only
+  socket.on('rtc', ({ to, data } = {}) => {
+    if (!data || typeof data.t !== 'string' || !allowed(socket.id, to)) return;
+    io.to(to).emit('rtc', { from: socket.id, data: { t: data.t, sdp: data.sdp, c: data.c } });
+  });
+
+  // Truth or Dare
+  socket.on('game', ({ to, type, kind } = {}) => {
+    if (!allowed(socket.id, to)) return;
+    if (type === 'pick') {
+      if (!['truth', 'dare'].includes(kind)) return;
+      const text = pickOne(kind === 'truth' ? TRUTHS : DARES);
+      for (const id of [socket.id, to]) io.to(id).emit('game', { from: socket.id, type: 'q', kind, text });
+      return;
+    }
+    if (['invite', 'accept', 'decline', 'done', 'end'].includes(type)) io.to(to).emit('game', { from: socket.id, type });
   });
 
   socket.on('block', id => {
