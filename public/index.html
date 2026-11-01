@@ -20,7 +20,7 @@ input{background:#1c2038;color:#eee;width:100%;max-width:320px;outline:1px solid
 .av{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;flex:none}
 .dot{width:9px;height:9px;border-radius:50%;background:#2ecc71;margin-left:auto}.dot.new{background:#ff7675}
 #chat{flex:1;display:flex;flex-direction:column;min-width:0}
-#head{padding:12px 16px;border-bottom:1px solid #232846;display:flex;gap:8px;align-items:center}
+#head{padding:12px 16px;border-bottom:1px solid #232846;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 #head b{flex:1}#head button{background:#232846;color:#eee;padding:6px 10px;font-size:.8rem;cursor:pointer}
 #back{display:none}
 #msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
@@ -30,9 +30,9 @@ input{background:#1c2038;color:#eee;width:100%;max-width:320px;outline:1px solid
 .empty{margin:auto;color:#789;text-align:center;padding:20px}
 @media(max-width:700px){#side{width:100%}#chat{display:none;width:100%}#app.chatting #side{display:none}#app.chatting #chat{display:flex}#back{display:block}}
 #toasts{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;flex-direction:column}
-.tb,#gbox{padding:10px 16px;background:#1c2038;border-bottom:1px solid #232846;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.tb button,#gbox button{padding:6px 12px;font-size:.85rem;cursor:pointer;background:#6c5ce7;color:#fff}
-#gbox .q{flex-basis:100%;font-size:1.05rem}
+.tb,#gbox,#tbox{padding:10px 16px;background:#1c2038;border-bottom:1px solid #232846;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tb button,#gbox button,#tbox button{padding:6px 12px;font-size:.85rem;cursor:pointer;background:#6c5ce7;color:#fff}
+#gbox .q,#tbox .q{flex-basis:100%;font-size:1.05rem}
 </style></head><body>
 
 <div id="s1" class="center"><h1>💬 Baatlo</h1><p>No sign-up. No phone number. No email.</p>
@@ -50,8 +50,9 @@ input{background:#1c2038;color:#eee;width:100%;max-width:320px;outline:1px solid
  <div id="side"><h3 id="stitle">Online</h3><div id="list"></div></div>
  <div id="chat"><div id="head"><button id="back" onclick="closeChat()">←</button><b id="who">Select someone</b>
   <button onclick="blk()" id="bb" class="hide">Block</button><button onclick="rep()" id="rb" class="hide">Report</button>
-  <button onclick="callBtn()" id="cb" class="hide">📞 Call</button><button onclick="invite()" id="gb" class="hide">🎲 Truth &amp; Dare</button></div>
+  <button onclick="callBtn()" id="cb" class="hide">📞 Call</button><button onclick="invite()" id="gb" class="hide">🎲 Truth &amp; Dare</button><button onclick="tlInvite()" id="tb" class="hide">🕵️ 2 Truths &amp; 1 Lie</button></div>
   <div id="gbox" class="hide"></div>
+  <div id="tbox" class="hide"></div>
   <div id="msgs"><div class="empty">Click on someone who is online to start chatting 👈</div></div>
   <form id="bar" class="hide" onsubmit="send(event)"><input id="txt" maxlength="500" placeholder="Type a message..." autocomplete="off"><button class="btn">Send</button></form>
  </div></div>
@@ -89,8 +90,8 @@ function renderList(){
 function open(id){
  active=id;unread[id]=0;const u=users.find(x=>x.id===id);
  $('who').textContent=u?u.name+', '+u.age:'Offline';
- ['bb','rb','cb','gb'].forEach(i=>$(i).classList.remove('hide'));$('bar').classList.remove('hide');
- $('app').classList.add('chatting');renderList();renderChat();renderGame();
+ ['bb','rb','cb','gb','tb'].forEach(i=>$(i).classList.remove('hide'));$('bar').classList.remove('hide');
+ $('app').classList.add('chatting');renderList();renderChat();renderGame();renderTL();
 }
 function closeChat(){$('app').classList.remove('chatting')}
 function renderChat(){
@@ -220,4 +221,60 @@ s.on('users',l=>{
  if(game&&!l.find(u=>u.id===game.with)){game=null;renderGame()}
  if(peer&&!l.find(u=>u.id===peer))endCall(false);
 });
+
+/* ---------- Two Truths and a Lie ---------- */
+let tlg=null; // {with, role:'write'|'wait'|'guess'|'result', stmts, result, note}
+const tsend=(type,extra)=>s.emit('tl',Object.assign({to:tlg?tlg.with:active,type},extra||{}));
+function tlInvite(){
+ if(!active)return;
+ if(tlg)return alert('A round is already running.');
+ s.emit('tl',{to:active,type:'invite'});alert('Invite sent! Waiting for them to accept.');
+}
+function renderTL(){
+ const g=$('tbox');
+ if(!tlg||tlg.with!==active){g.classList.add('hide');return}
+ g.innerHTML='';g.classList.remove('hide');
+ const add=(txt,cls)=>{const d=document.createElement('div');if(cls)d.className=cls;d.textContent=txt;g.appendChild(d)};
+ const btn=(l,f)=>{const b=document.createElement('button');b.textContent=l;b.onclick=f;g.appendChild(b)};
+ add('🕵️ Two Truths & a Lie with '+nm(tlg.with));
+ if(tlg.role==='write'){
+  add('Write 2 truths and 1 lie about yourself. Tick the radio button next to your lie:','q');
+  const ins=[];let lie=0;
+  for(let i=0;i<3;i++){
+   const row=document.createElement('div');row.className='q';
+   const r=document.createElement('input');r.type='radio';r.name='tlr';r.style.cssText='width:auto;margin-right:8px';
+   if(i===0)r.checked=true;r.onchange=()=>{lie=i};
+   const t=document.createElement('input');t.maxLength=120;t.placeholder='Statement '+(i+1);t.style.cssText='width:calc(100% - 30px);max-width:none';
+   row.append(r,t);g.appendChild(row);ins.push(t);
+  }
+  btn('Send',()=>{
+   const v=ins.map(x=>x.value.trim());
+   if(v.some(x=>!x))return alert('Please fill all 3 statements.');
+   tsend('set',{stmts:v,lie});tlg.role='wait';tlg.note='Sent! Waiting for them to guess...';renderTL();
+  });
+ }else if(tlg.role==='guess'){
+  add('Which one is the LIE?','q');
+  tlg.stmts.forEach((t,i)=>btn((i+1)+'. '+t,()=>{tsend('guess',{guess:i});tlg.role='wait';tlg.note='Guess sent...';renderTL()}));
+ }else if(tlg.role==='result'){
+  const r=tlg.result;
+  add(r.mine?(r.correct?'🎉 They found your lie!':'😎 You fooled them!'):(r.correct?'✅ Correct! You found the lie.':'❌ Wrong! You got fooled.'),'q');
+  r.stmts.forEach((t,i)=>add((i===r.lie?'🤥 LIE: ':'✔ TRUTH: ')+t,'q'));
+  if(!r.mine)btn('Next round (my turn to write)',()=>{tsend('next');tlg.role='write';tlg.result=null;renderTL()});
+  else add('Waiting for them to start the next round...','q');
+ }else add(tlg.note||('Waiting for '+nm(tlg.with)+' to write their statements...'),'q');
+ btn('End game',()=>{tsend('end');tlg=null;renderTL()});
+}
+s.on('tl',m=>{
+ if(m.type==='invite'){
+  banner('tl',nm(m.from)+' wants to play Two Truths & a Lie 🕵️',[
+   ['Play',()=>{s.emit('tl',{to:m.from,type:'accept'});tlg={with:m.from,role:'wait'};unbanner('tl');open(m.from)}],
+   ['No thanks',()=>{s.emit('tl',{to:m.from,type:'decline'});unbanner('tl')}]]);
+ }else if(m.type==='accept'){tlg={with:m.from,role:'write'};open(m.from)}
+ else if(m.type==='decline')alert('They declined the invite.');
+ else if(m.type==='guess'&&tlg){tlg.role='guess';tlg.stmts=m.stmts;renderTL()}
+ else if(m.type==='result'&&tlg){tlg.role='result';tlg.result={stmts:m.stmts,lie:m.lie,correct:m.correct,mine:m.from!==s.id};renderTL()}
+ else if(m.type==='next'&&tlg){tlg.role='wait';tlg.note='';tlg.result=null;renderTL()}
+ else if(m.type==='end'&&tlg){tlg=null;renderTL();alert('The game was ended.')}
+});
+s.on('users',l=>{if(tlg&&!l.find(u=>u.id===tlg.with)){tlg=null;renderTL()}});
 </script></body></html>
